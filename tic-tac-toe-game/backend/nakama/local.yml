@@ -1,0 +1,9 @@
+logger:
+  level: INFO
+  stdout: true
+session:
+  token_expiry_sec: 7200
+socket:
+  server_key: "your_server_key_here"
+runtime:
+  js_entrypoint: "build/main.js"

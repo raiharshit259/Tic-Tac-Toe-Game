@@ -1,0 +1,57 @@
+@import url("https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 220 16% 96%;
+    --foreground: 220 20% 10%;
+    --card: 0 0% 100%;
+    --card-foreground: 220 20% 10%;
+    --primary: 172 66% 50%;
+    --secondary: 220 14% 90%;
+    --muted: 220 14% 92%;
+    --muted-foreground: 220 10% 46%;
+    --border: 220 13% 86%;
+    --game-x: 172 66% 42%;
+    --game-o: 340 65% 52%;
+    --game-win: 48 96% 50%;
+  }
+
+  .dark {
+    --background: 224 20% 6%;
+    --foreground: 220 14% 92%;
+    --card: 224 18% 10%;
+    --card-foreground: 220 14% 92%;
+    --primary: 172 66% 50%;
+    --secondary: 224 16% 14%;
+    --muted: 224 16% 16%;
+    --muted-foreground: 220 10% 60%;
+    --border: 224 14% 18%;
+    --game-x: 172 66% 55%;
+    --game-o: 340 65% 62%;
+    --game-win: 48 96% 58%;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-family: "Plus Jakarta Sans", system-ui, -apple-system, sans-serif;
+    transition: background-color 0.35s ease, color 0.35s ease;
+  }
+}
+
+@layer components {
+  .mesh-bg {
+    background-color: hsl(var(--background));
+    background-image:
+      radial-gradient(at 20% 80%, hsl(var(--primary) / 0.08) 0%, transparent 50%),
+      radial-gradient(at 80% 20%, hsl(340 65% 58% / 0.06) 0%, transparent 50%),
+      radial-gradient(at 40% 40%, hsl(var(--primary) / 0.03) 0%, transparent 60%);
+  }
+}

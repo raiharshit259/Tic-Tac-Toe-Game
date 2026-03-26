@@ -1,0 +1,19 @@
+{
+  "name": "tic-tac-toe-game",
+  "private": true,
+  "version": "1.0.0",
+  "workspaces": [
+    "frontend",
+    "backend/nakama",
+    "shared"
+  ],
+  "scripts": {
+    "install:all": "npm install --workspaces",
+    "dev": "npm --workspace frontend run dev",
+    "start": "npm --workspace frontend run preview",
+    "build": "npm --workspace frontend run build && npm --workspace backend/nakama run build",
+    "build:frontend": "npm --workspace frontend run build",
+    "build:backend": "npm --workspace backend/nakama run build",
+    "test:e2e": "npm --workspace frontend run test:e2e"
+  }
+}
