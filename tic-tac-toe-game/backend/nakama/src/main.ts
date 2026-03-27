@@ -18,6 +18,7 @@ import {
   rpcSetUsername as internalRpcSetUsername,
   rpcSubmitMove as internalRpcSubmitMove,
 } from "./controllers/rpcController";
+import { ensureRuntimeSchema } from "./services/schemaService";
 import type { MatchState } from "./types/matchTypes";
 
 function matchInit(
@@ -158,9 +159,11 @@ runtimeGlobal.rpcGetMatchHistory = rpcGetMatchHistory;
 function InitModule(
   _ctx: nkruntime.Context,
   logger: nkruntime.Logger,
-  _nk: nkruntime.Nakama,
+  nk: nkruntime.Nakama,
   initializer: nkruntime.Initializer,
 ): void {
+  ensureRuntimeSchema(nk, logger);
+
   initializer.registerMatch("tic_tac_toe", {
     matchInit,
     matchJoinAttempt,
