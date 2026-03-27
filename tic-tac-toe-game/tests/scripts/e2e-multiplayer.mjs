@@ -10,6 +10,26 @@ const ssl = (process.env.NAKAMA_SSL || "false") === "true";
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+async function waitForNakamaReady(timeoutMs = 120000) {
+  const started = Date.now();
+  const endpoint = `http${ssl ? "s" : ""}://${host}:${port}/`;
+
+  while (Date.now() - started < timeoutMs) {
+    try {
+      const response = await fetch(endpoint);
+      if (response.status > 0) {
+        return;
+      }
+    } catch (_error) {
+      // Retry until timeout.
+    }
+
+    await sleep(1500);
+  }
+
+  throw new Error(`Nakama not reachable at ${endpoint} within ${timeoutMs}ms`);
+}
+
 function assert(condition, message) {
   if (!condition) {
     throw new Error(message);
@@ -61,7 +81,23 @@ async function waitForState(socket, timeoutMs = 10000) {
   });
 }
 
+async function waitForMatchState(client, session, matchId, predicate, timeoutMs = 15000) {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    const resp = await client.rpc(session, "get_match_state", { matchId });
+    const state = parseRpcPayload(resp.payload).state;
+    if (predicate(state)) {
+      return state;
+    }
+    await sleep(350);
+  }
+  throw new Error(`Timed out waiting for expected state for match ${matchId}`);
+}
+
 async function main() {
+  logStep("wait for nakama");
+  await waitForNakamaReady();
+
   logStep("create clients");
   const clientA = new Client(serverKey, host, port, ssl);
   const clientB = new Client(serverKey, host, port, ssl);
@@ -149,6 +185,87 @@ async function main() {
       winningState.players.some((p) => p.username.startsWith(`Mohit_${runId}`)),
     "match state must include persisted real usernames",
   );
+
+  logStep("bot fallback matchmaking timeout");
+  const clientE = new Client(serverKey, host, port, ssl);
+  const userE = await createUser(clientE, `e2e-e-${runId}`, `E2E_E_${runId}`);
+  const fallback = parseRpcPayload(
+    (await clientE.rpc(userE.session, "find_match", { botFallbackTimeoutSeconds: 4 })).payload,
+  );
+  await userE.socket.joinMatch(fallback.matchId);
+
+  const botStartState = await waitForMatchState(
+    clientE,
+    userE.session,
+    fallback.matchId,
+    (state) => state.phase === "playing" && state.players.some((p) => p.username === "Nakama Bot"),
+    15000,
+  );
+  assert(botStartState.players.length === 2, "Bot fallback should create a 2-player match.");
+
+  const myMark = botStartState.players.find((p) => p.userId === userE.session.user_id)?.mark;
+  assert(myMark === "X" || myMark === "O", "Unable to determine human mark in bot fallback match.");
+
+  const firstOpenCell = botStartState.board.findIndex((cell) => cell === null);
+  assert(firstOpenCell >= 0, "Bot fallback match should have at least one open cell.");
+
+  await clientE.rpc(userE.session, "submit_move", { matchId: fallback.matchId, index: firstOpenCell });
+
+  const botRespondedState = await waitForMatchState(
+    clientE,
+    userE.session,
+    fallback.matchId,
+    (state) => state.moves.length >= 2,
+    8000,
+  );
+
+  assert(
+    botRespondedState.moves.some((m) => m.userId === "00000000-0000-0000-0000-000000000001"),
+    "Bot fallback opponent did not submit a server-authoritative move.",
+  );
+
+  await userE.socket.disconnect(false);
+  await sleep(400);
+  await userE.socket.connect(userE.session, true);
+  await userE.socket.joinMatch(fallback.matchId);
+
+  const recoveredBotState = parseRpcPayload(
+    (await clientE.rpc(userE.session, "get_match_state", { matchId: fallback.matchId })).payload,
+  ).state;
+  assert(recoveredBotState.matchId === fallback.matchId, "Reconnect during bot match failed to recover state.");
+
+  logStep("disconnect during wait should not leave stale slot");
+  const clientF = new Client(serverKey, host, port, ssl);
+  const userF = await createUser(clientF, `e2e-f-${runId}`, `E2E_F_${runId}`);
+
+  const waitOnly = parseRpcPayload((await clientF.rpc(userF.session, "find_match", { botFallbackTimeoutSeconds: 8 })).payload);
+  await userF.socket.joinMatch(waitOnly.matchId);
+  await userF.socket.disconnect(true);
+  let cleaned = false;
+  const cleanupStart = Date.now();
+  while (Date.now() - cleanupStart < 10000) {
+    try {
+      const postDisconnect = parseRpcPayload(
+        (await clientF.rpc(userF.session, "get_match_state", { matchId: waitOnly.matchId })).payload,
+      ).state;
+      if (
+        Array.isArray(postDisconnect.players) &&
+        (postDisconnect.players.length === 0 || postDisconnect.players.every((p) => p.connected === false))
+      ) {
+        cleaned = true;
+        break;
+      }
+    } catch (_error) {
+      // Also acceptable if runtime already cleaned up the fully-empty waiting match.
+      cleaned = true;
+      break;
+    }
+    await sleep(400);
+  }
+
+  assert(cleaned, "Waiting disconnect should mark room players disconnected or cleanup the waiting match.");
+
+  await userE.socket.disconnect(false);
 
   logStep("rematch + reconnect");
   parseRpcPayload((await clientA.rpc(userA.session, "rematch_request", { matchId: room.matchId })).payload);

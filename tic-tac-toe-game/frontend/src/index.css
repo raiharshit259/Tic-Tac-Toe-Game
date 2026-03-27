@@ -4,6 +4,25 @@
 @tailwind components;
 @tailwind utilities;
 
+html.e2e-test-mode *,
+html.e2e-test-mode *::before,
+html.e2e-test-mode *::after {
+  animation-duration: 0s !important;
+  animation-delay: 0s !important;
+  transition-duration: 0s !important;
+  transition-delay: 0s !important;
+  scroll-behavior: auto !important;
+}
+
+html.e2e-test-mode .interactive-tilt,
+html.e2e-test-mode .board-tilt,
+html.e2e-test-mode .home-focus-stage,
+html.e2e-test-mode .screen-transition-layer,
+html.e2e-test-mode .planet-system {
+  transform: none !important;
+  filter: none !important;
+}
+
 @layer base {
   :root {
     --ui-tilt-x: 0deg;

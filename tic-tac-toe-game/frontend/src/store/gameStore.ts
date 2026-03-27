@@ -16,6 +16,8 @@ type QueueState = "none" | "searching";
 const SESSION_TOKEN_KEY = "ttt-session-token";
 const SESSION_REFRESH_KEY = "ttt-session-refresh";
 const ACTIVE_MATCH_KEY = "ttt-active-match-id";
+const INIT_MAX_RETRIES = 10;
+const INIT_RETRY_DELAY_MS = 1500;
 
 interface GameStore {
   connectionState: ConnectionState;
@@ -64,6 +66,62 @@ const decodeSocketData = (data: string | Uint8Array): string => {
   return new TextDecoder().decode(data);
 };
 
+const sleep = (ms: number): Promise<void> =>
+  new Promise((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
+
+const getErrorStatusCode = (error: unknown): number | null => {
+  if (!error || typeof error !== "object") {
+    return null;
+  }
+
+  const candidate = error as {
+    status?: number;
+    statusCode?: number;
+    code?: number;
+    message?: string;
+  };
+
+  if (typeof candidate.status === "number") {
+    return candidate.status;
+  }
+  if (typeof candidate.statusCode === "number") {
+    return candidate.statusCode;
+  }
+
+  // Nakama JS errors may only expose status in message text.
+  const text = String(candidate.message || "");
+  const match = text.match(/\b([45]\d{2})\b/);
+  if (match) {
+    return Number(match[1]);
+  }
+
+  return null;
+};
+
+const isRetryableInitError = (error: unknown): boolean => {
+  const status = getErrorStatusCode(error);
+  if (status === null) {
+    return true;
+  }
+
+  if (status === 408 || status === 429) {
+    return true;
+  }
+
+  return status >= 500;
+};
+
+const toInitErrorMessage = (error: unknown): string => {
+  const status = getErrorStatusCode(error);
+  if (status === 409) {
+    return "Sign-in conflict detected. Retry has been stopped to avoid loops.";
+  }
+
+  return error instanceof Error ? error.message : "Failed to connect to Nakama.";
+};
+
 export const useGameStore = create<GameStore>((set, get) => ({
   connectionState: "idle",
   queueState: "none",
@@ -91,23 +149,40 @@ export const useGameStore = create<GameStore>((set, get) => ({
       const cachedToken = localStorage.getItem(SESSION_TOKEN_KEY);
       const cachedRefresh = localStorage.getItem(SESSION_REFRESH_KEY);
 
-      let session: Session;
-      if (cachedToken && cachedRefresh) {
-        const restored = Session.restore(cachedToken, cachedRefresh);
-        if (!restored.isexpired(Date.now() / 1000)) {
-          session = restored;
-        } else {
-          session = await client.authenticateDevice(deviceId, true, username);
+      let session: Session | null = null;
+      let socket: Socket | null = null;
+
+      for (let attempt = 1; attempt <= INIT_MAX_RETRIES; attempt += 1) {
+        try {
+          if (cachedToken && cachedRefresh) {
+            const restored = Session.restore(cachedToken, cachedRefresh);
+            if (!restored.isexpired(Date.now() / 1000)) {
+              session = restored;
+            } else {
+              session = await client.authenticateDevice(deviceId, true, username);
+            }
+          } else {
+            session = await client.authenticateDevice(deviceId, true, username);
+          }
+
+          localStorage.setItem(SESSION_TOKEN_KEY, session.token);
+          localStorage.setItem(SESSION_REFRESH_KEY, session.refresh_token);
+
+          socket = client.createSocket((import.meta.env.VITE_NAKAMA_SSL ?? "false") === "true", false);
+          await socket.connect(session, true);
+          break;
+        } catch (error) {
+          const retryable = isRetryableInitError(error);
+          if (!retryable || attempt >= INIT_MAX_RETRIES) {
+            throw error;
+          }
+          await sleep(INIT_RETRY_DELAY_MS);
         }
-      } else {
-        session = await client.authenticateDevice(deviceId, true, username);
       }
 
-      localStorage.setItem(SESSION_TOKEN_KEY, session.token);
-      localStorage.setItem(SESSION_REFRESH_KEY, session.refresh_token);
-
-      const socket = client.createSocket((import.meta.env.VITE_NAKAMA_SSL ?? "false") === "true", false);
-      await socket.connect(session, true);
+      if (!session || !socket) {
+        throw new Error("Failed to establish Nakama session.");
+      }
 
       socket.onmatchdata = (message) => {
         if (message.op_code === GAME_OP_CODE.STATE) {
@@ -159,10 +234,21 @@ export const useGameStore = create<GameStore>((set, get) => ({
         }
       }
     } catch (error) {
+      const retryable = isRetryableInitError(error);
       set({
         connectionState: "idle",
-        errorMessage: error instanceof Error ? error.message : "Failed to connect to Nakama.",
+        errorMessage: toInitErrorMessage(error),
       });
+
+      // Keep retrying in the background so startup races do not lock the UI.
+      if (retryable) {
+        window.setTimeout(() => {
+          const state = get();
+          if (state.connectionState === "idle") {
+            void state.init();
+          }
+        }, INIT_RETRY_DELAY_MS);
+      }
     }
   },
 
@@ -246,7 +332,13 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
     try {
       set({ queueState: "searching" });
-      const response = await client.rpc(session, "find_match", {});
+      const timeoutOverride = Number(import.meta.env.VITE_BOT_MATCH_TIMEOUT_OVERRIDE_SECONDS ?? "");
+      const payload =
+        Number.isFinite(timeoutOverride) && timeoutOverride > 0
+          ? { botFallbackTimeoutSeconds: Math.floor(timeoutOverride) }
+          : {};
+
+      const response = await client.rpc(session, "find_match", payload);
       const parsed = unwrapRpc<{ matchId: string }>(response.payload);
       await socket.joinMatch(parsed.matchId);
       localStorage.setItem(ACTIVE_MATCH_KEY, parsed.matchId);

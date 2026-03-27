@@ -28,14 +28,15 @@ export function createNakamaClient() {
   const port = import.meta.env.VITE_NAKAMA_PORT ?? "7350";
   const serverKey = import.meta.env.VITE_SERVER_KEY ?? import.meta.env.VITE_NAKAMA_SERVER_KEY ?? "your_server_key_here";
   const useSSL = (import.meta.env.VITE_NAKAMA_SSL ?? "false") === "true";
+  const deviceId = getDeviceId();
 
   const client = new Client(serverKey, host, port, useSSL);
 
   return {
     client,
-    deviceId: getDeviceId(),
-    // Nakama requires a username during device auth. If the player has not chosen one yet,
-    // use a deterministic hidden technical value and prompt for a real username in UI.
-    username: getStoredUsername() ?? `u-${getDeviceId().slice(-8)}`,
+    deviceId,
+    // Keep authentication username internal and deterministic to avoid collisions
+    // with user-facing names selected later through set_username RPC.
+    username: `u-${deviceId.replace("device-", "").slice(0, 12)}`,
   };
 }

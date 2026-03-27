@@ -32,6 +32,10 @@ services:
     entrypoint: ["/bin/sh", "-ec"]
     command:
       - "/nakama/nakama migrate up --database.address postgres:${POSTGRES_PASSWORD:-changeme_local_only}@postgres:5432/nakama; exec /nakama/nakama --name nakama1 --database.address postgres:${POSTGRES_PASSWORD:-changeme_local_only}@postgres:5432/nakama --config /nakama/data/local.yml"
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      NAKAMA_TEST_MODE: ${NAKAMA_TEST_MODE:-false}
+      NAKAMA_BOT_MATCH_TIMEOUT_SECONDS: ${NAKAMA_BOT_MATCH_TIMEOUT_SECONDS:-30}
     ports:
       - "7349:7349"
       - "7350:7350"

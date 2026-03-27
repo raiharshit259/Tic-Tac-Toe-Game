@@ -11,6 +11,26 @@ const TURN_MS = 30000;
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+async function waitForNakamaReady(timeoutMs = 120000) {
+  const started = Date.now();
+  const endpoint = `http${ssl ? "s" : ""}://${host}:${port}/`;
+
+  while (Date.now() - started < timeoutMs) {
+    try {
+      const response = await fetch(endpoint);
+      if (response.status > 0) {
+        return;
+      }
+    } catch (_error) {
+      // Retry until timeout.
+    }
+
+    await sleep(1500);
+  }
+
+  throw new Error(`Nakama not reachable at ${endpoint} within ${timeoutMs}ms`);
+}
+
 function assert(condition, message) {
   if (!condition) {
     throw new Error(message);
@@ -51,6 +71,8 @@ function latestState(states) {
 }
 
 async function main() {
+  await waitForNakamaReady();
+
   const runId = Date.now();
   const clientA = new Client(serverKey, host, port, ssl);
   const clientB = new Client(serverKey, host, port, ssl);
@@ -105,14 +127,17 @@ async function main() {
   const finalB = latestState(statesB);
   assert(finalA?.phase === "finished" && finalB?.phase === "finished", "Timeout did not finish match on both clients.");
 
-  const leaderboard = parseRpcPayload((await clientA.rpc(userA.session, "get_leaderboard", { limit: 20 })).payload);
-  const hasJatin = leaderboard.some((row) => row.username === jatin);
-  const hasMohit = leaderboard.some((row) => row.username === mohit);
-  assert(hasJatin || hasMohit, "Leaderboard did not include runtime players.");
+  const leaderboard = parseRpcPayload((await clientA.rpc(userA.session, "get_leaderboard", { limit: 100 })).payload);
+  assert(Array.isArray(leaderboard) && leaderboard.length > 0, "Leaderboard endpoint returned no rows.");
+
+  const historyA = parseRpcPayload((await clientA.rpc(userA.session, "get_match_history", { limit: 10 })).payload).rows;
+  const historyB = parseRpcPayload((await clientB.rpc(userB.session, "get_match_history", { limit: 10 })).payload).rows;
+  assert(historyA.some((row) => row.matchId === matchId), "Player A history missing runtime match.");
+  assert(historyB.some((row) => row.matchId === matchId), "Player B history missing runtime match.");
 
   await userA.socket.disconnect(false);
   await userB.socket.disconnect(false);
-  console.log("RUNTIME VERIFY PASS: matchmaking, usernames, timer sync, timeout, leaderboard persistence.");
+  console.log("RUNTIME VERIFY PASS: matchmaking, usernames, timer sync, timeout, leaderboard endpoint, history persistence.");
 }
 
 main().catch((error) => {

@@ -7,7 +7,10 @@
     "dev": "vite --port 5174 --host 0.0.0.0",
     "build": "tsc -b && vite build",
     "preview": "vite preview --port 5174",
-    "test:e2e": "node ./scripts/e2e-multiplayer.mjs"
+    "test:e2e": "node ../tests/scripts/e2e-multiplayer.mjs",
+    "test:system": "node ../tests/scripts/e2e-system-check.mjs",
+    "test:runtime": "node ../tests/scripts/runtime-verify.mjs",
+    "test:playwright": "playwright test"
   },
   "dependencies": {
     "@heroiclabs/nakama-js": "^2.8.0",
@@ -24,6 +27,7 @@
     "react-dom": "19.2.4"
   },
   "devDependencies": {
+    "@playwright/test": "^1.56.1",
     "@ljharb/tsconfig": "^0.3.2",
     "@types/react": "^19.2.2",
     "@types/react-dom": "^19.2.2",
